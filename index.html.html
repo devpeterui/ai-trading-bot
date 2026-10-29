@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VibeTrade AI Dashboard</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 16px;
+        }
+        .container {
+            background-color: #1e1e1e;
+            padding: 28px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            text-align: center;
+            width: 100%;
+            max-width: 380px;
+        }
+        h1 { font-size: 24px; margin: 0 0 20px; color: #00e676; }
+        input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 12px;
+            border-radius: 6px;
+            border: 1px solid #333;
+            background: #2a2a2a;
+            color: #fff;
+            font-size: 16px;
+        }
+        .status {
+            margin: 15px 0 0;
+            padding: 10px;
+            border-radius: 6px;
+            background-color: #2a2a2a;
+            font-size: 14px;
+            word-break: break-word;
+        }
+        button {
+            background-color: #00e676;
+            color: #121212;
+            border: none;
+            padding: 12px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: 0.2s ease;
+            width: 100%;
+        }
+        button:hover { background-color: #00c853; }
+        button:disabled { background-color: #555; cursor: not-allowed; }
+        .sell { background-color: #ff5252; color: #fff; }
+        .sell:hover { background-color: #e53935; }
+        .row { display: flex; gap: 10px; }
+        .link { background: none; color: #aaa; font-weight: normal; font-size: 14px; margin-top: 14px; padding: 6px; }
+        .link:hover { background: none; color: #fff; }
+        .acct { text-align: left; background: #2a2a2a; border-radius: 8px; padding: 12px; font-size: 14px; line-height: 1.6; margin-bottom: 14px; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: bold; }
+        .demo { background: #2e7d32; }
+        .live { background: #c62828; }
+        .hidden { display: none; }
+        label { display: block; text-align: left; font-size: 12px; color: #aaa; margin-bottom: 4px; }
+        .hint { font-size: 12px; color: #888; text-align: left; margin: -6px 0 12px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>VibeTrade AI Dashboard</h1>
+
+    <!-- LOGIN VIEW -->
+    <div id="loginView">
+        <label for="bridge">Bridge URL</label>
+        <input id="bridge" type="url" placeholder="https://xxxx.trycloudflare.com" autocapitalize="off" autocorrect="off">
+        <div class="hint">Leave blank if this page is served by the bridge itself.</div>
+
+        <label for="access">Access code</label>
+        <input id="access" type="password" placeholder="Shown in the bridge console" autocomplete="off">
+
+        <label for="login">MT5 account</label>
+        <input id="login" type="tel" inputmode="numeric" placeholder="Account number" autocomplete="username">
+        <input id="password" type="password" placeholder="MT5 password" autocomplete="current-password">
+        <input id="server" type="text" placeholder="Server" value="HFMMarketsKE-Demo2" autocapitalize="off">
+        <button id="loginBtn" onclick="doLogin()">Log in</button>
+    </div>
+
+    <!-- TRADING VIEW -->
+    <div id="tradeView" class="hidden">
+        <div class="acct" id="acct"></div>
+
+        <label for="symbol">Symbol</label>
+        <input id="symbol" type="text" value="EURUSD" autocapitalize="characters">
+        <label for="volume">Volume (lots)</label>
+        <input id="volume" type="number" step="0.01" min="0.01" value="0.01">
+
+        <div class="row">
+            <button id="buyBtn" onclick="sendSignal('buy')">BUY</button>
+            <button id="sellBtn" class="sell" onclick="sendSignal('sell')">SELL</button>
+        </div>
+        <button class="link" onclick="doLogout()">Log out</button>
+    </div>
+
+    <div id="status" class="status">Status: Please log in</div>
+</div>
+
+<script>
+    let isDemo = true;
+    const $ = id => document.getElementById(id);
+
+    // Bridge base URL: saved in this browser; blank = same origin
+    function base() {
+        return (localStorage.getItem('bridgeUrl') || '').replace(/\/+$/, '');
+    }
+
+    function api(path, options = {}) {
+        options.headers = Object.assign(
+            {
+                'Content-Type': 'application/json',
+                'ngrok-skip-browser-warning': '1',
+                'Authorization': 'Bearer ' + (sessionStorage.getItem('token') || '')
+            },
+            options.headers || {}
+        );
+        return fetch(base() + path, options);
+    }
+
+    function setStatus(text, color) {
+        const s = $('status');
+        s.innerText = text;
+        s.style.color = color;
+    }
+
+    function showView(loggedIn) {
+        $('loginView').classList.toggle('hidden', loggedIn);
+        $('tradeView').classList.toggle('hidden', !loggedIn);
+    }
+
+    function renderAccount(a) {
+        isDemo = a.demo;
+        const badge = a.demo
+            ? '<span class="badge demo">DEMO</span>'
+            : '<span class="badge live">LIVE</span>';
+        const safe = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        $('acct').innerHTML =
+            `${badge} <b>${safe(a.name || 'Account')}</b><br>` +
+            `#${safe(a.login)} &middot; ${safe(a.server)}<br>` +
+            `Balance: ${a.balance.toFixed(2)} ${safe(a.currency)}<br>` +
+            `Equity: ${a.equity.toFixed(2)} ${safe(a.currency)}`;
+    }
+
+    async function doLogin() {
+        const btn = $('loginBtn');
+        let bridge = $('bridge').value.trim();
+        if (bridge && !/^https?:\/\//i.test(bridge)) bridge = 'https://' + bridge;
+        localStorage.setItem('bridgeUrl', bridge);
+
+        btn.disabled = true;
+        setStatus('Connecting to bridge...', '#ffeb3b');
+        try {
+            const res = await api('/login', {
+                method: 'POST',
+                body: JSON.stringify({
+                    access_code: $('access').value,
+                    login: $('login').value,
+                    password: $('password').value,
+                    server: $('server').value
+                })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                sessionStorage.setItem('token', data.token);
+                $('password').value = '';
+                $('access').value = '';
+                renderAccount(data.account);
+                showView(true);
+                setStatus('Connected', '#00e676');
+            } else {
+                setStatus(data.message, '#ff5252');
+            }
+        } catch (e) {
+            console.error(e);
+            setStatus('Cannot reach bridge. Check the URL and that it is running.', '#ff5252');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function doLogout() {
+        try { await api('/logout', { method: 'POST' }); } catch (e) {}
+        sessionStorage.removeItem('token');
+        showView(false);
+        setStatus('Logged out', '#aaa');
+    }
+
+    async function refreshAccount() {
+        const res = await api('/account');
+        if (res.status === 401 || res.status === 503) throw new Error('session');
+        const data = await res.json();
+        renderAccount(data.account);
+    }
+
+    async function sendSignal(side) {
+        const symbol = $('symbol').value.trim().toUpperCase();
+        const volume = parseFloat($('volume').value);
+
+        if (!symbol || !(volume > 0)) {
+            setStatus('Enter a symbol and a volume', '#ff5252');
+            return;
+        }
+        if (!isDemo && !confirm(`LIVE ACCOUNT: ${side.toUpperCase()} ${volume} ${symbol}?`)) return;
+
+        $('buyBtn').disabled = $('sellBtn').disabled = true;
+        setStatus('Sending order...', '#ffeb3b');
+
+        try {
+            const res = await api('/execute', {
+                method: 'POST',
+                body: JSON.stringify({ side, symbol, volume })
+            });
+            const data = await res.json();
+
+            if (res.status === 401) {
+                sessionStorage.removeItem('token');
+                showView(false);
+                setStatus('Session expired, log in again', '#ff5252');
+            } else if (data.status === 'success') {
+                setStatus(`Order #${data.order} filled @ ${data.price}`, '#00e676');
+                refreshAccount().catch(() => {});
+            } else {
+                setStatus(`Failed: ${data.message}`, '#ff5252');
+            }
+        } catch (e) {
+            console.error(e);
+            setStatus('Cannot reach bridge. Check the URL and that it is running.', '#ff5252');
+        } finally {
+            $('buyBtn').disabled = $('sellBtn').disabled = false;
+        }
+    }
+
+    // Restore saved bridge URL and resume session if the bridge still has it
+    (async function init() {
+        $('bridge').value = localStorage.getItem('bridgeUrl') || '';
+        if (!sessionStorage.getItem('token')) return;
+        try {
+            await refreshAccount();
+            showView(true);
+            setStatus('Connected', '#00e676');
+        } catch (e) {
+            sessionStorage.removeItem('token');
+        }
+    })();
+</script>
+
+</body>
+</html>
